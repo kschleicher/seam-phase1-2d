@@ -1,0 +1,175 @@
+#!/usr/bin/python
+from rsf.proj import *
+
+# -----------------------------------------------------------------------------------------
+# Capture a single CDP900 
+# Ex. /home/jeff/madagascar/book/rsf/su/rsflab16 
+# When queried actual header values such as cdp are not reatining their values i.e. cdp900
+# is listed as 148 however all the traces are there.
+#--------------------------------------------------------------------------------------------
+
+for key in ('cdp','offset'):
+    Flow(key,'../iva/cdp_hdr.rsf','dd type=float | headermath output=%s' % key)
+
+Flow('cdpmask','cdp','mask min=900 max=900')
+
+Flow('cdp900','../iva/cdp.rsf cdpmask',
+     '''
+     headerwindow mask=${SOURCES[1]} 
+     | pow pow1=2    
+     | window min1=0 max1=7.5
+     ''')       
+#   
+Flow('offset900','offset cdpmask',
+     'headerwindow mask=${SOURCES[1]}')
+Plot('offset900','grey')
+
+Result('cdp900','cdp900 offset900','sfwiggle')
+
+Plot('cdp900','sfgrey')
+
+#-----------------------------------------------------------------------------------------
+# VSCAN no filter
+# Attempting to pick some prelminary primary velocites with sfipick, at the present time 
+# Using sfimage with .rsf file and printing the results to the terminal screen with sftahnmo
+# have been my best results. Auto pick does not create the necessary movemout to allow for
+# clear differentiation betweer the two waves.
+#--------------------------------------------------------------------------------------------
+
+Flow('vscan1','cdp900 offset900',
+'''
+vscan semblance=y half=n nv=125 v0=1300 dv=25 offset=${SOURCES[1]}\
+''')
+ 
+Plot('vscan1','grey color=j allpos=y title="Semblance scan" unit2=m/s')
+
+# -----------------------------------------------------------------------------------------------------------
+# Apply NMO with the water velocity 1400 m/s seems to flatten the multiples the best. However I did not obtain
+# good results using this approach. The best image I've come up with concerning move out and p-values for the
+# primary and multiple waves have been using velocities picked from a single cdp using the sfimage and the sftah
+# NMO program.
+# -----------------------------------------------------------------------------------------------------------
+
+Flow('watervel','cdp900','window n2=1 | math output=900')
+Flow('waternmo','cdp900 offset900 watervel',
+     'nmo half=n offset=${SOURCES[1]} velocity=${SOURCES[2]}')
+
+# -----------------------------------------------------------------------------------------------------------
+# Create Velocity function
+# -----------------------------------------------------------------------------------------------------------
+
+tnmo=(3.9208,4.42133,5.20787,6.30427) 
+vnmo=(1480.23,1487.44,1523.49,1588.37)
+  
+#tnmo=(3,3.5,4,4.5,5,5.5,6,6.5,7,7.5) 
+#vnmo=(1500,2000,4500,3000,3500,4000,4500,5000,5500,6000)
+
+#tnmo=(2.90783,3.98039,4.17107,4.26640,4.44516,4.81460,5.17212,6.07784,6.60220,6.82863,7.23382,7.49600)
+#vnmo=(1343.26,1617.21,2071.40,1804.65,1300.00,1732.56,1950.00,2554.42,4136.79,3131.16,4090.00,4205.35)
+
+Flow('cdp900vpick.asc',None,
+     '''
+     echo %s n1=%d n2=2 data_format=ascii_float in=$TARGET
+     ''' % (' '.join(map(str,tnmo)+map(str,vnmo)),len(tnmo)))
+Flow('cdp900vel','cdp900vpick.asc cdp900',
+     'dd form=native | linear pattern=${SOURCES[1]}') # rect=5 niter=100')
+
+Flow('cdp900nmo','cdp900 offset900 cdp900vel',
+     'nmo half=n offset=${SOURCES[1]} velocity=${SOURCES[2]}')
+
+#--------------------------------------------------------------------------------------------
+# Slant Stack
+# Using the sftahnmo cdp I've used the sfslant program to change the data to the taup domain.
+# In this example I've used the sfcut program to isolate the signal
+#--------------------------------------------------------------------------------------------
+
+Flow('slantwatervel','waternmo offset900','slant adj=y p0=-.02 np=400 dp=0.0001 offset=${SOURCES[1]}')
+
+# -----------------------------------------------------------------------------------------------------------
+# Design mute for mutiples in the taup domain MAY NOT USE
+# -----------------------------------------------------------------------------------------------------------
+
+Flow('slantmute','slantwatervel','mutter t0=0 tp=4.25 v0=.0025 x0=.06')
+# 
+
+#Flow('slantmuteinv','slantmute','slant adj=n x0=1 dx=1 nx=151')
+
+
+#Flow('slantpriminv','slantprim','slant adj=n x0=1 dx=1 nx=151')
+
+Flow('slantwatervelcut','slantwatervel','cut max2=-0.016 min1=2.25')
+
+Flow('signal','slantwatervelcut',
+     '''
+     slant adj=n x0=1 dx=1 nx=151 
+     ''')
+
+# -----------------------------------------------------------------------------------------------------------
+# INMO requires offset=${SOURCES[1]} velocity=${SOURCES[2]} in that order or the moveout will not work properly.
+# Subtract muliples and creat new Vscan
+# -----------------------------------------------------------------------------------------------------------
+
+Flow('signaltest','signal offset900 watervel',
+     '''
+     inmo half=n offset=${SOURCES[1]} velocity=${SOURCES[2]} |
+     mutter v0=1500 hyper=y t0=2 offset=${SOURCES[1]} 
+     ''')
+
+Flow('test','cdp900 signaltest',
+     '''
+     add scale=1,-1 ${SOURCES[1]}
+     ''') 
+
+tnmob=(2.54102,3.35414,3.59554,4.17997,4.30702,4.40866,4.84064,5.18367,5.66647,5.83163,6.06033,6.35000,6.82263,6.93698,7.2546,7.43247)
+vnmob=(1543.06,1543.06,1564.58,2296.53,1672.22,1350.00,1822.92,1930.56,2210.42,2597.92,2684.03,1350.00,3329.86,4298.61,4427.78,1586.11)
+
+Flow('testvpick.asc',None,
+     '''
+     echo %s n1=%d n2=2 data_format=ascii_float in=$TARGET
+     ''' % (' '.join(map(str,tnmob)+map(str,vnmob)),len(tnmob)))
+Flow('testnmo','testvpick.asc cdp900',
+     'dd form=native | linear pattern=${SOURCES[1]}') # rect=5 niter=100')
+
+Flow('fnmo','test offset900 testnmo',
+     'nmo half=n offset=${SOURCES[1]} velocity=${SOURCES[2]}')
+
+#Flow('slanttest','multiples','slant adj=n x0=1 dx=1 nx=151')
+
+#Flow('slantmutetest','slanttest offset900 testcdp900vel',
+#     '''
+#     inmo half=n offset=${SOURCES[1]} velocity=${SOURCES[2]} |
+#     mutter v0=1500 hyper=y t0=2 offset=${SOURCES[1]} 
+#     ''')
+
+#Flow('primary','cdp900 slantmutetest',
+#     '''
+#     add scale=1,-1 ${SOURCES[1]} 
+#     ''') 
+
+Flow('vscan2','test offset900',
+'''
+vscan semblance=y half=n nv=125 nb=2 v0=1500 dv=25 weighted=y offset=${SOURCES[1]}\
+''')
+
+#Plot('vscan2','grey color=j allpos=y title="Multiples semblance scan"')
+
+# -----------------------------------------------------------------------------------------------------------
+# Compare filtered and unfiltered frequency spectrum
+# -----------------------------------------------------------------------------------------------------------
+
+#spectra = []
+#for case in Split('cdp900 primary'):
+#    Flow(case+'-spectra',case,'spectra all=y')
+#    spectra.append(case+'-spectra')
+
+#Result('spectra',spectra,
+#       '''
+#       cat axis=2 ${SOURCES[1:2]} | 
+#       scale axis=1 | 
+#       window max1=50 |
+#       graph title=Spectra dash=0,5 plotcol=6,5
+#       ''')
+
+End()
+
+ 
