@@ -1,0 +1,205 @@
+#!/usr/bin/python
+from rsf.proj import *
+
+# Sort entire dataset to CDP 
+
+Flow(['cdp','cdp_hdr'],
+     ['../decon/ep_sort_dp.rsf','../decon/ep_sort_dp_hdr.rsf'],	
+     '''
+     sftahsort \
+       input=${SOURCES[0]} \
+	   sort="cdp offset" \
+	   verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahgethw \
+         key=cdp,cdpt,offset 2>cmp_hdr.txt \
+     | sftahmute  xmute=0,20000 tmute=1.75,20 ntaper=12 \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label3=cdp o3=148 n3=1501 d3=1 \
+	     label2=cdpt o2=1 n2=151 d2=1 \
+         label1=time o1=0 n1=7 d2=1 \
+     ''',stdout=0, stdin=0)
+Plot('cdp','grey')
+#      
+#      | sftahmute  xmute=0,20000 tmute=1.75,20 ntaper=12 \
+# | sftahmute  xmute=0,20000 tmute=1.75,20 ntaper=12 \
+#      | sftahmute  xmute=0,20000 tmute=1.75,20 ntaper=12 \
+
+Flow('cdptime','cdp','window min3=900 max3=900')
+Plot('cdptime','sfgrey')
+
+# Extract a single CDP for taup analysis
+
+Flow('cdp800','cdp','window min3=800 max3=800 title="CDP800"')
+
+Plot('cdp800','sfgrey')
+
+# Gather CDPs 800-900 with full fold for Velocity Analysis
+
+Flow(['cdpsemb','cdpsemb_hdr'],
+     ['cdp','cdp_hdr'],
+     '''
+     sftahsort \
+     input=${SOURCES[0]} \
+	 sort="cdp:800,900,10 offset" \
+	 verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahmute xmute=0,20000 tmute=1.75,20 ntaper=25 \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label3=cdp o3=800 n3=11 d3=10 \
+         label2=cdpt o2=1 n2=151 d2=1 \ 
+     ''',stdout=0,stdin=0)
+
+# Sort CDP 800-900 for NMO
+
+Flow(['cdpnmo','cdpnmo_hdr'],
+     ['cdp','cdp_hdr'],
+     '''
+     sftahsort \
+     input=${SOURCES[0]} \
+	 sort="cdp offset" \
+	 verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahnmo                                                           
+         tnmo=2.38337,3.4 0385,4.39475,6.21387,6.89419,8.81683,9.95563 \
+         vnmo=1400,1453.57,1614.29,2150,2404.46,3797.32,4292.86 \
+     | sftahmute xmute=0,20000 tmute=1.75,20 ntaper=25 \
+     | sftahgain tpow=1.5 verbose=1 \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label3=cdp o3=148 n3=1501 d3=1 \
+         label2=cdpt o2=1 n2=151 d2=1 \ 
+     ''',stdout=0,stdin=0)
+
+# Perform nmo on one cdp 900
+
+Flow(['cdp900nmo','cdpnmo900_hdr'],
+     ['cdp','cdp_hdr'],
+     '''
+     sftahsort \
+     input=${SOURCES[0]} \
+     sort="cdp offset" \
+     verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahnmo   
+         tnmo=0,2,6,10.5,16 \
+         vnmo=1500,1500,2250,3250,3700 \                                                 
+     | sftahmute xmute=0,20000 tmute=1.75,20 ntaper=25 \
+     | sftahgain tpow=1.5 verbose=1 \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label3=cdp o3=900 n3=1 d3=1 \
+         label2=cdpt o2=1 n2=151 d2=1 \
+         label1=time o1=0 n1=7 d2=1 \ 
+     ''',stdout=0,stdin=0)
+
+# tnmo=2.46522,3.39624,3.94698,6.0057,6.55644,7.46123,8.01197 \
+#         vnmo=1328.84,1429.77,1530.7,1963.26,2280.47,2806.74,3916.98 \
+  
+# Calculate CVS for CDPs 800-900 with the given velocity values and increments
+
+stkfiles=[]
+for vel in range(1400,4500,300):
+    print('vel=',vel)
+    stkfiles.append("stk%d.rsf"%vel)
+    print("stkfiles=",stkfiles)
+    
+    Flow(['stk%d.rsf'%vel , 'stk%d_hdr.rsf'%vel ],
+         ['../decon/ep_sort_dp.rsf','../decon/ep_sort_dp_hdr.rsf'],
+         '''
+         sftahsort input=$SOURCE sort="cdp offset"
+         | sftahnmo tnmo=0 vnmo=%d \
+         | sftahstack key=cdp \
+	   xmute=0,20000 tmute=1.75,20 ntaper=25 \
+         | sftahwrite \
+           output=${TARGETS[0]} \
+           verbose=1 \
+           label2=cdp o2=800 n2=1 d2=1 \        
+         '''%vel,stdout=0,stdin=0)
+
+#label2=cdpt o2=1 n2=151 d2=1 \   
+
+print("final stkfiles=",stkfiles)
+
+Flow("cvsstk",stkfiles,
+     '''
+     sfcat ${SOURCES[0:-2]} 
+     | sfput label3="vel" d3=300 o3=1400  
+     ''',stdin=0)
+
+#Plot cvs for cdp 800
+
+Flow('cvsstk800','cvsstk','transp plane=23')
+
+Plot('cvsstk800','sfgrey title="CVS800"')
+
+#Create semblance plots for the data set
+
+#Extract offsets from the CDP header file
+
+Flow('offset','cdpsemb_hdr',
+     '''
+     sfdd type=float | sfheadermath output=offset 
+     ''')
+
+Plot('offset','grey')
+
+Flow('vscan','cdpsemb offset',
+     '''
+     vscan semblance=y half=n offset=offset.rsf nv=125 v0=1400 dv=25 \
+     ''')
+
+Plot('vscan','grey color=j allpos=y title="Velocity Scan"')
+
+#Plot vscan for cdp800
+
+Flow('cdp800semb','vscan',
+       '''
+       sfpow pow1=2 
+       | sfwindow min2=1400 max2=4400 
+       ''')
+
+#Interactive pick Tests
+
+Flow('ipick.txt','cdp800semb',
+     '''
+     ipick grid1=y grid2=y xll=1 yll=1 yur=1 xur=4.02305 ppi=100 color=j 
+     ''')
+
+#Plot('cmp800cvs','sfpow pow1=1.5 | sfgrey title="CVS" xll=1 yll=1 yur=1 xur=4.02305 ppi=100')
+#Plot('cmp800semb','sfgrey color=j allpos=y title="Semblence"')
+#Plot('test','cmp800semb cmp800cvs cmpnmo800 cmp800','SideBySideAniso')
+
+# Stack
+
+#Flow(['stack.rsf' , 'stack.rsf'],
+#     ['../decon/ep_sort_dp.rsf','../decon/ep_sort_dp_hdr.rsf'],
+#     '''
+#     sftahsort input=$SOURCE sort="xline offset"
+#     | sftahnmo tnmo=2.38337,3.40385,4.39475,6.21387,6.89419,8.81683,9.95563 \
+#       vnmo=1400,1453.57,1614.29,2150,2404.46,3797.32,4292.86 \
+#     | sftahstack key=xline \
+#       xmute=0,20000 tmute=0,20 ntaper=25 \
+#     | sftahwrite \
+#       verbose=1
+#       label2=xline o2=148 n2=1501 d2=1 
+#       output=${TARGETS[0]}
+#     ''',stdout=0,stdin=0)
+       
+#Plot('stack','sfpow pow1=2 | sfmutter t0=0 tp=1.2 v0=1450 slope0=5 abs=y inner=y | sfgrey title="v(t) stack"')   
+
+# sfwindow to dissect j3=10
+# sfmutter /sftahmute
+# this will read the input data order
+# velconv su program 
+# dephasing operator deterministic filter sftahfilter filter=2x coefficients filter file=filter file get from seam, how did they make least squares # equations
+# the filter source sig, designed zerophase look at amplitude spectrum 
+# velocity analysis nmo (velan.sh) sftahnmo
+# stack
+
+
+
+End()
+
