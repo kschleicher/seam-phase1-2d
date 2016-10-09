@@ -3,13 +3,7 @@ from rsf.proj import *
 #
 # Make filter.rsf
 #
-Flow('filter',None,'spike n1=1000 k1=300 | bandpass fhi=2 phase=n')
- 
-#
-# Make filter.vpl
-#
-Result('filter','wiggle clip=0.02 title="Welcome to Madagascar"')
- 
+
 #Flow('wavelet',
 #     '../fetch/SEAM_wavelet_8ms.rsf ../fetch/SEAM_wavelet-g_8ms_hdr.rsf',
 Result('wavelet','../fetch/SEAM_wavelet_8ms.rsf',
@@ -39,15 +33,15 @@ Flow('wave1.rsf wave1_hdr.rsf',
      '''
      sftahread \
         input=${SOURCES[0]} \
-	headers=${SOURCES[1]} \
-	verbose=1 \
+	   headers=${SOURCES[1]} \
+	   verbose=1 \
      | sftahfilter \
        verbose=3 \
        filter_file=${SOURCES[2]}
      | sftahwrite \
           output=${TARGETS[0]}
           label2="dt" o2=8000 n2=1 d2=1 \
-	  verbose=1
+	        verbose=1
      ''',stdout=0,stdin=0)
 Result('wave1','sfwiggle title=wave1')
 
@@ -55,9 +49,9 @@ Flow('wave2.rsf wave2_hdr.rsf',
      'wave1.rsf wave1_hdr.rsf ../fetch/desig_8ms.rsf',
      '''
      sftahread \
-        input=${SOURCES[0]} \
-	headers=${SOURCES[1]} \
-	verbose=1 \
+       input=${SOURCES[0]} \
+	     headers=${SOURCES[1]} \
+	     verbose=1 \
      | sftahfilter \
        verbose=3 \
        filter_file=${SOURCES[2]}   \
@@ -74,39 +68,12 @@ Result('wave2','sfwindow min1=.8 max1=1.2 | sfwiggle title=wave2')
 # Output header values to text file
 #-------------------------------------------------------------------------------
 
-Flow(['ep','ep_hdr'],
-     ['../fetch/shots-receivers-23900.rsf','../fetch/shots-receivers-23900_hdr.rsf'],
-     '''
-     sftahread \
-       input=${SOURCES[0]} 
-       verbose=1 \
-     | sftahheadermath \
-       outputkey=offset \
-       output="abs(sx-gx)" \
-     | sftahheadermath \
-       outputkey=xline \
-       output='(((sx+gx)*100)/2/125+5)/10' \
-     | sftahheadermath outputkey=cdp output=xline \
-     | sftahheadermath \
-       outputkey=iline \
-       output=1 \      
-     | sftahgethw \
-       key=tracr,tracf,ep,cdp,offset,gelev,selev,sdepth,scalel,scalco,sx,sy,gx,gy,ns,dt,grnlof,smeas4,smeasu,unass1,unass2 2>raw_hdr.txt \
-     | sftahwrite \
-       output=${TARGETS[0]} \
-       label2="ep" o2=3041 n2=151 d2=81 \
-       label3="tracf" o3=361 n3=901 d3=721 \
-       verbose=1
-     ''',stdout=0, stdin=0)
-
-Plot('ep','sfgrey title=Fldr')
-
 #-------------------------------------------------------------------------------
 # Apply deterministic deconvolution via the filter provided with the seam data
 #-------------------------------------------------------------------------------
 
 Flow(['decon.rsf','decon_hdr.rsf'],
-     ['ep','ep_hdr.rsf','../fetch/desig_8ms.rsf'],
+     ['../ntg/shots-receivers-23900_headfix.rsf','../ntg/shots-receivers-23900_headfix_hdr.rsf','../fetch/desig_8ms.rsf'],
      '''
      sftahread \
        input=${SOURCES[0]} \
@@ -115,14 +82,94 @@ Flow(['decon.rsf','decon_hdr.rsf'],
      | sftahfilter \
        verbose=3 \
        filter_file=${SOURCES[2]}
-       filter_index_t0=84
+       filter_index_t0=0
      | sftahwrite \
        output=${TARGETS[0]}
-       label2="ep" o2=3041 n2=151 d2=81 \
-       label3="tracf" o3=361 n3=901 d3=721 \            
+       label2="gx" o2=0 n2=901 d2=25 \
+       label3="sx" o3=3700 n3=161 d3=100 \   
      ''',stdout=0,stdin=0)
 
 Plot('decon','sfgrey title=Deconvolution')
+
+#-------------------------------------------------------------------------------
+# Sort to NTG for comparison with raw data NTG
+#-------------------------------------------------------------------------------
+
+Flow(['ntgdecon.rsf','ntgdecon_hdr.rsf'],
+     ['decon.rsf',  
+      'decon_hdr.rsf'],
+     '''
+     sftahsort \
+       input=${SOURCES[0]} \
+       sort="cdp offset:0,200" \
+       verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahgain tpow=1.5 verbose=1 \
+     | sftahgethw \
+         key=cdp,cdpt,offset 2>ntg_hdr.txt \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label2=cdp o2=148 n2=1501 d2=1 \
+         label3=cdpt o3=1 n3=1 d3=1 \
+         verbose=1
+     ''',stdout=0, stdin=0)
+
+Plot('ntgdecon','grey title=Near Trace Gather with Deconvolution') 
+
+
+#-------------------------------------------------------------------------------
+# Create figures for comparison with raw data
+#-------------------------------------------------------------------------------
+       
+Result('ntgdecon',"sfgrey title='near trace gather'")
+
+Result('ntgzoomdecon','ntgdecon',
+  '''
+  sfwindow min1=1.5 max1=4.5 \
+  | sfgrey title='Near Trace Gather Deconvolution'
+  ''')
+
+Plot('ntgz1decon','ntgdecon',
+  '''
+  sfwindow min1=1.75 max1=2.25 \
+  | sfgrey title='Near Trace Gather Deconvolution'
+  ''')
+
+Plot('ntgz2decon','ntgdecon',
+  '''
+  sfwindow min1=3.75 max1=4.25 \
+  | sfgrey title='Near Trace Gather Deconvolution'
+  ''')
+
+Result('ntgdeconzoom2','ntgz1decon ntgz2decon','SideBySideAniso')
+
+#-------------------------------------------------------------------------------
+# Compare the data before and after deconvolution Raw Vs Decon
+#-------------------------------------------------------------------------------
+
+Result('ntgcomp','ntgdecon ../ntg/Fig/ntg.vpl','SideBySideAniso')
+
+#-------------------------------------------------------------------------------
+# Compare NTG zoom at different times and display with single trace from raw and
+# Processed data
+#-------------------------------------------------------------------------------
+
+Result('ntgcomp_15_45','./Fig/ntgzoomdecon.vpl ../ntg/Fig/ntgzoom.vpl','SideBySideAniso')
+
+Result('ntgcomp_175_225','ntgz1decon ../ntg/ntgz1.vpl','SideBySideAniso')
+
+Result('ntgcomp_375_425','ntgz2decon ../ntg/ntgz2.vpl','SideBySideAniso')
+
+
+Flow('cdp900_cdpt1','ntgdecon',
+     '''
+     sfwindow \
+     min1=1.5 max1=4.5 \
+     min2=900 max2=900 \
+     min3=1 max3=1 \
+     ''')
+
+Plot('cdp900_cdpt1','sfgraph title=Dephase') 
 
 End()
 
