@@ -1,0 +1,350 @@
+#!/usr/bin/env python
+from rsf.proj import *
+import math
+
+# Raw Data Header Values
+#
+#****************** 
+#jeff@localhost ~/seam/processing> sfheaderattr < shots-receivers-23900_hdr.rsf
+#91 headers, 136051 traces                                                                                                    
+#******************************************************************************* 
+#     key                    min                       max                 mean
+#------------------------------------------------------------------------------- 
+#tracr       1              1 @ 0                136051 @ 136050          68026
+#tracf       3            361 @ 0                649261 @ 900            324811
+#ep          4           3041 @ 0                 15191 @ 135150           9116
+#gelev      12            -15 @ 0                   -15 @ 0                 -15
+#selev      13            -15 @ 0                   -15 @ 0                 -15
+#sdepth     14             15 @ 0                    15 @ 0                  15
+#scalel     19              1 @ 0                     1 @ 0                   1
+#scalco     20              1 @ 0                     1 @ 0                   1
+#sx         21           3700 @ 0                 18700 @ 135150          11200
+#sy         22          23900 @ 0                 23900 @ 0               23900
+#gx         23              0 @ 0                 22500 @ 900             11250
+#gy         24          23900 @ 0                 23900 @ 0               23900
+#ns         38           2001 @ 0                  2001 @ 0                2001
+#dt         39           8000 @ 0                  8000 @ 0                8000
+#grnlof     68             15 @ 0                    15 @ 0                  15
+#smeas4     86          26881 @ 0                 26881 @ 0               26881
+#smeasu     88         -32768 @ 127               32515 @ 894           1987.64
+#unass1     89              6 @ 66                65298 @ 113522        32645.3
+#unass2     90          38166 @ 0                 38166 @ 0               38166
+#******************************************************************************* 
+
+# Compute CDPs and Offsets window data by shot record (ep) and tracf key
+# work in centimeters.  cdpint=1250 cm 625 is half cdpint added to round
+# comment out 
+#| sftahgethw \
+#       key=tracr,tracf,ep,cdp,offset,gelev,selev,sdepth,scalel,scalco,sx,sy,gx,gy,ns,dt,grnlof,smeas4,smeasu,unass1,unass2 2>raw_hdr.txt \
+# I have not use for this huge txt file.
+#-------------------------------------------------------------------------------
+
+Flow(['ep_sort','ep_sort_hdr'],
+     ['../fetch/shots-receivers-23900.rsf','../fetch/shots-receivers-23900_hdr.rsf'],
+     '''
+     sftahread \
+       input=${SOURCES[0]} 
+       verbose=1 \
+     | sftahheadermath \
+       outputkey=offset \
+       output="abs(sx-gx)" \
+     | sftahheadermath \
+       outputkey=xline \
+       output='(((sx+gx)*100)/2+615)/1250' \
+     | sftahheadermath outputkey=cdp output=xline \
+     | sftahheadermath \
+       outputkey=iline \
+       output=1 \      
+     | sftahgethw \
+       key=tracr,tracf,ep,cdp,offset,gelev,selev,sdepth,scalel,scalco,sx,sy,gx,gy,ns,dt,grnlof,smeas4,smeasu,unass1,unass2 2>raw_hdr.txt \
+     | sftahwrite \
+       output=${TARGETS[0]} \
+       label2="ep" o2=3041 n2=151 d2=81 \
+       label3="tracf" o3=361 n3=901 d3=721 \
+       verbose=1
+     ''',stdout=0, stdin=0)
+
+Plot('ep_sort','sfgrey')
+Result('ep_sort','sfgrey')
+# sftahwrite output traces mode=seek to output traces time-label trace-label2
+# offset vscan
+# Window one trace from one ep via tracf key
+#-------------------------------------------------------------------------------
+
+Flow('ep3041','ep_sort',
+     '''
+     sfwindow \
+     min1=5 max1=7 \
+     min2=3041 max2=3041 \
+     min3=361 max3=361 \
+     ''')
+Plot('tracf361','ep3041','sfgraph')
+
+# Apply deterministic deconvolution via the filter provided with the seam data
+#-------------------------------------------------------------------------------
+
+Flow(['ep_sort_dp.rsf','ep_sort_dp_hdr.rsf'],
+     ['ep_sort.rsf','ep_sort_hdr.rsf','../fetch/desig_8ms.rsf'],
+     '''
+     sftahread \
+        input=${SOURCES[0]} \
+	headers=${SOURCES[1]} \
+	verbose=1 \
+     | sftahfilter \
+       verbose=1 \
+       filter_file=${SOURCES[2]} filt_indx_t0=84         \
+     | sftahwrite \
+       output=${TARGETS[0]}
+       label2="ep" o2=3041 n2=151 d2=81 \
+       label3="tracf" o3=361 n3=901 d3=721 \
+     ''',stdout=0,stdin=0)
+
+Plot('ep_sort_dp','sfgrey')
+
+# Extract the same trace from the ep with the deconvolution applied
+# Can extract 1st and apply decon without applyin to all data
+# 
+# check the scale for the sfgraph check
+#-------------------------------------------------------------------------------
+
+Flow('ep3041_dp','ep_sort_dp',
+     '''
+     sfwindow \
+     min1=5 max1=7 \
+     min2=3041 max2=3041 \
+     min3=361 max3=361 \
+     ''')
+
+# Compare the traces before and after deconvolution
+#-------------------------------------------------------------------------------
+
+Plot('tracf361_dp','ep3041_dp','sfgraph title="Dephase" symbol=. symbolsz=8') 
+
+#Result('ep_dp_comp','tracf361 tracf361_dp','Overlay')
+
+# Sort to offset for first break mute
+#-------------------------------------------------------------------------------
+
+#Flow(['offset','offset_hdr'],
+#     ['ep_sort_dp','ep_sort_dp_hdr'],
+#     '''
+#     sftahsort \
+#       input=${SOURCES[0]} \
+#       sort="ep offset" \  
+#     | sftahwrite \
+#         output=${TARGETS[0]}
+#         label2="offset" o2=3700 n2=202 d2=75 \
+#         label3="ep" o3=3041 n3=151 d3=81 \
+#         verbose=1 \
+#     ''',stdout=0, stdin=0) 
+
+# Sort to CDP for Velocity Analysis & NMO
+# Sergey recommends sfipick or sfwxipick 
+
+Flow(['cmp.rsf','cmp_hdr.rsf'],
+     ['ep_sort_dp.rsf','ep_sort_dp_hdr.rsf'],	
+     '''
+     sftahsort \
+         input=${SOURCES[0]} \
+	 sort="cdp:800,900,10 offset" \
+	 verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahmute  xmute=0,20000 tmute=0,20 ntaper=12 \
+     | sftahgain tpow=1.5 verbose=1 \    
+     | sftahgethw \
+       key=cdp,cdpt 2>cmp_hdr.txt \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label3=cdp o3=800 n3=10 d3=10 \
+	 label2=cdpt o2=1 n2=151 d2=1 \
+         verbose=1
+     ''',stdout=0, stdin=0)
+
+Plot('cmp','sfgrey')
+
+Flow('cmp800','cmp',
+       '''
+       sfpow tpow=2 
+       | sfwindow min3=800 max3=800 min1=1.5 max1=10
+       ''')
+
+Plot('cmp800','sfgrey title="CMP800"')
+
+# Create cmp800 with NMO applied
+
+Flow(['cmpnmo.rsf','cmpnmo_hdr.rsf'],
+     ['ep_sort_dp.rsf','ep_sort_dp_hdr.rsf'],
+     '''
+     sftahsort \
+         input=${SOURCES[0]} \
+	 sort="cdp:800,900,10 offset" \
+	 verbose=1 \
+     | sftahmakeskey pkey=cdp skey=cdpt \
+     | sftahnmo tnmo=2.8,3.65217,4.38261,5.56522,6.12174,7.13043,7.6 \
+       vnmo=1310,1350,1600,2900,3200,4000,4500 \
+       xmute=0,20000 tmute=0,20 ntaper=25 \
+     | sftahgain tpow=1.5 verbose=1 \
+     | sftahwrite \
+         output=${TARGETS[0]} \
+         label3=cdp o3=800 n3=11 d3=10 \
+         label2=cdpt o2=1 n2=151 d2=1 \ 
+     ''',stdout=0,stdin=0)
+
+#
+Flow('cmpnmo800','cmpnmo',
+       '''
+       sfpow tpow=2 
+       | sfwindow min3=800 max3=800 max1=10 min1=1.5
+       ''')
+
+Plot('cmpnmo800','sfgrey title="CMPNMO800"')
+
+# Calculate cvs for given velocity values and increments
+stkfiles=[]
+for vel in range(1400,4500,300):
+    print('vel=',vel)
+    stkfiles.append("stk%d.rsf"%vel)
+    print("stkfiles=",stkfiles)
+    
+    Flow(['stk%d.rsf'%vel , 'stk%d_hdr.rsf'%vel ],
+         ['ep_sort_dp.rsf','ep_sort_dp_hdr.rsf'],
+         '''
+         sftahsort input=$SOURCE sort="cdp offset"
+         | sftahnmo tnmo=0 vnmo=%d \
+         | sftahstack key=xline \
+	   xmute=0,20000 tmute=0,20 ntaper=25 \
+         | sftahwrite \
+           verbose=1
+           label2=cdp o2=148 n2=1501 d2=1 
+           output=${TARGETS[0]}
+         '''%vel,stdout=0,stdin=0)
+
+print("final stkfiles=",stkfiles)
+
+
+Flow("cvsstk",stkfiles,
+     '''
+     sfcat ${SOURCES[0:-2]} 
+     | sfput label3="vel" d3=300 o3=1400  
+     ''',stdin=0)
+
+Plot('cvsstk','sfgrey title="CVS"')
+
+#Plot cvs for cdp 800
+Flow('cmp800cvs','cvsstk',
+     '''
+     sfwindow min3=1400 max3=4400 min2=800 max2=800 max1=10 min1=1.5
+     ''')
+
+# in="/home/jeff/jeff/seam/processing/cvsstk.rsf@"
+#    esize=4 type=float form=native 
+#    n1=2001        d1=0.008       o1=0          label1="Time" unit1="s" 
+#    n2=1501        d2=1           o2=148        label2="cdp" 
+#    n3=11          d3=300         o3=1400       label3="vel" 
+
+
+#Create semblance plots for the data set
+
+Flow('offsemb','cmp_hdr.rsf',
+     '''
+     sfdd type=float | sfheadermath output=offset 
+     ''')
+
+Flow('vscan','cmp.rsf offsemb.rsf',
+     '''
+     vscan semblance=y half=n offset=offsemb.rsf nv=125 v0=1400 dv=25 \
+     ''')
+
+Plot('vscan','grey color=j allpos=y title="Velocity Scan"')
+
+#Plot vscan for cmp800
+
+Flow('cmp800semb','vscan',
+       '''
+       sfpow pow1=2 
+       | sfwindow min2=1400 max2=4400 min3=800 max3=800 max1=10 min1=1.5
+       ''')
+
+#Interactive pick Tests
+
+#Flow('ipick.txt','cmp800semb',
+#     '''
+#     ipick 
+#     ''')
+
+Plot('cmp800cvs','sfpow pow1=1.5 | sfgrey title="CVS"')
+Plot('cmp800semb','sfgrey color=j allpos=y title="Semblence"')
+Plot('test','cmp800semb cmp800cvs cmpnmo800 cmp800','SideBySideAniso')
+
+
+
+#| sfscale rscale=.10
+# xll=2 yll=1.5 yur=9 xur=6
+#sfscale
+#DESCRIPTION
+#        Scale data.
+#SYNOPSIS
+#        sfscale < in.rsf > out.rsf axis=0 rscale=0. pclip=100. dscale=1.
+#COMMENTS
+#        
+#        To scale by a constant factor, you can also use sfmath.
+#        
+#PARAMETERS
+#        int     axis=0  Scale by maximum in the dimensions up to this axis. 
+#        float   dscale=1.       Scale by this factor (works if rscale=0) 
+#        float   pclip=100.      data clip percentile 
+#        float   rscale=0.       Scale by this factor.
+
+
+# float screenht=VP_STANDARD_HEIGHT 	
+ 
+#float screenratio=VP_SCREEN_RATIO 	
+ 
+#float screenwd=screenht / screenratio 
+#******************************************************************************* 
+#     key     	         
+
+
+
+# sfwindow to dissect j3=10
+# sfmutter /sftahmute
+# this will read the input data order
+# velconv su program 
+# dephasing operator deterministic filter sftahfilter filter=2x coefficients filter file=filter file get from seam, how did they make least squares # equations
+# the filter source sig, designed zerophase look at amplitude spectrum 
+# velocity analysis nmo (velan.sh) sftahnmo
+# stack
+
+
+#******************************************************************************* 
+#     key     	            min     	              max    	          mean
+#------------------------------------------------------------------------------- 
+#tracr       1              1 @ 0	        136051 @ 136050	         68026
+#tracf       3            361 @ 0	        649261 @ 135900	        324811
+#ep          4           3041 @ 0	         15191 @ 150	          9116
+#cdp         5            148 @ 0	          1648 @ 136050	           898
+#offset     11              0 @ 22348	         18800 @ 135900	       6474.86
+#gelev      12            -15 @ 0	           -15 @ 0	           -15
+#selev      13            -15 @ 0	           -15 @ 0	           -15
+#sdepth     14             15 @ 0	            15 @ 0	            15
+#scalel     19              1 @ 0	             1 @ 0	             1
+#scalco     20              1 @ 0	             1 @ 0	             1
+#sx         21           3700 @ 0	         18700 @ 150	         11200
+#sy         22          23900 @ 0	         23900 @ 0	         23900
+#gx         23              0 @ 0	         22500 @ 135900	         11250
+#gy         24          23900 @ 0	         23900 @ 0	         23900
+#ns         38           2001 @ 0	          2001 @ 0	          2001
+#dt         39           8000 @ 0	          8000 @ 0	          8000
+#grnlof     68             15 @ 0	            15 @ 0	            15
+#iline      73              1 @ 0	             1 @ 0	             1
+#xline      74            148 @ 0	          1648 @ 136050	           898
+#smeas4     86          26881 @ 0	         26881 @ 0	         26881
+#smeasu     88         -32768 @ 19177	         32515 @ 134994	       1987.64
+#unass1     89              6 @ 318	         65298 @ 120497	       32645.3
+#unass2     90          38166 @ 0	         38166 @ 0	         38166
+#******************************************************************************* 
+    
+End()
+
+
+
