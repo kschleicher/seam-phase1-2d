@@ -80,9 +80,9 @@ Flow(['decon.rsf','decon_hdr.rsf'],
        headers=${SOURCES[1]} \
        verbose=1 \
      | sftahfilter \
-       verbose=3 \
-       filter_file=${SOURCES[2]}
-       filter_index_t0=0
+       verbose=1 \
+       filter_file=${SOURCES[2]} \
+       filt_indx_t0=84 \
      | sftahwrite \
        output=${TARGETS[0]}
        label2="gx" o2=0 n2=901 d2=25 \
@@ -131,13 +131,13 @@ Result('ntgzoomdecon','ntgdecon',
 
 Plot('ntgz1decon','ntgdecon',
   '''
-  sfwindow min1=1.75 max1=2.25 \
+  sfwindow min1=1.800 max1=2.096 \
   | sfgrey title='Near Trace Gather Deconvolution'
   ''')
 
 Plot('ntgz2decon','ntgdecon',
   '''
-  sfwindow min1=3.75 max1=4.25 \
+  sfwindow min1=3.600 max1=4.192 \
   | sfgrey title='Near Trace Gather Deconvolution'
   ''')
 
