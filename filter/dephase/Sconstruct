@@ -1,67 +1,5 @@
+#!/usr/bin/python
 from rsf.proj import *
-
-#
-# Make filter.rsf
-#
-
-#Flow('wavelet',
-#     '../fetch/SEAM_wavelet_8ms.rsf ../fetch/SEAM_wavelet-g_8ms_hdr.rsf',
-Result('wavelet','../fetch/SEAM_wavelet_8ms.rsf',
-       '''
-       wiggle clip clip=.02 title="SEAM_wavelet_8ms"
-       ''')
-
-
-for wavelet in ["SEAM_wavelet_8ms", 
-                "SEAM_wavelet-g_8ms", 
-		"SEAM_wavelet-g-zph_8ms", 
-		"desig_8ms"] :
-   Result(wavelet,'../fetch/'+wavelet+".rsf",
-          'sfwiggle title=%s'%wavelet)
-
-Flow('spike1',None,
-     '''
-     spike n1=256 k1=126 \
-     | sfput d1=.008 
-     ''')
-
-Result('spike1','sfwindow min1=.8 max1=1.2 | sfwiggle title=spike1')
-
-
-Flow('wave1.rsf wave1_hdr.rsf',
-     'spike1.rsf ../fetch/SEAM_wavelet-g_8ms_hdr.rsf ../fetch/SEAM_wavelet-g_8ms.rsf',
-     '''
-     sftahread \
-        input=${SOURCES[0]} \
-	   headers=${SOURCES[1]} \
-	   verbose=1 \
-     | sftahfilter \
-       verbose=3 \
-       filter_file=${SOURCES[2]}
-     | sftahwrite \
-          output=${TARGETS[0]}
-          label2="dt" o2=8000 n2=1 d2=1 \
-	        verbose=1
-     ''',stdout=0,stdin=0)
-Result('wave1','sfwiggle title=wave1')
-
-Flow('wave2.rsf wave2_hdr.rsf',
-     'wave1.rsf wave1_hdr.rsf ../fetch/desig_8ms.rsf',
-     '''
-     sftahread \
-       input=${SOURCES[0]} \
-	     headers=${SOURCES[1]} \
-	     verbose=1 \
-     | sftahfilter \
-       verbose=3 \
-       filter_file=${SOURCES[2]}   \
-       filt_indx_t0=84             \
-     | sftahwrite \
-          output=${TARGETS[0]}
-          label2="dt" o2=8000 n2=1 d2=1 \
-	  verbose=1
-     ''',stdout=0,stdin=0)
-Result('wave2','sfwindow min1=.8 max1=1.2 | sfwiggle title=wave2')
 
 #-------------------------------------------------------------------------------
 # Compute CDPs and Offsets window data by shot record (ep) and tracf key
@@ -69,17 +7,21 @@ Result('wave2','sfwindow min1=.8 max1=1.2 | sfwiggle title=wave2')
 #-------------------------------------------------------------------------------
 
 #-------------------------------------------------------------------------------
-# Apply deterministic deconvolution via the filter provided with the seam data
+# Apply deterministic deconvolution via the filter provided with the seam data 
+# to the entire dataset
 #-------------------------------------------------------------------------------
 
 Flow(['decon.rsf','decon_hdr.rsf'],
-     ['../ntg/shots-receivers-23900_headfix.rsf','../ntg/shots-receivers-23900_headfix_hdr.rsf','../fetch/desig_8ms.rsf'],
+     ['../../ntg/shots-receivers-23900_headfix.rsf','../../ntg/shots-receivers-23900_headfix_hdr.rsf','../../fetch/desig_8ms.rsf'],
      '''
      sftahread \
        input=${SOURCES[0]} \
-       headers=${SOURCES[1]} \
+        headers=${SOURCES[1]} \
        verbose=1 \
      | sftahfilter \
+       verbose=3 \
+       filter_file=${SOURCES[2]}
+       filter_index_t0=0
        verbose=1 \
        filter_file=${SOURCES[2]} \
        filt_indx_t0=84 \
@@ -131,15 +73,18 @@ Result('ntgzoomdecon','ntgdecon',
 
 Plot('ntgz1decon','ntgdecon',
   '''
+  sfwindow min1=1.75 max1=2.25 \
   sfwindow min1=1.800 max1=2.096 \
   | sfgrey title='Near Trace Gather Deconvolution'
   ''')
 
 Plot('ntgz2decon','ntgdecon',
   '''
+  sfwindow min1=3.75 max1=4.25 \
   sfwindow min1=3.600 max1=4.192 \
   | sfgrey title='Near Trace Gather Deconvolution'
   ''')
+
 
 Result('ntgdeconzoom2','ntgz1decon ntgz2decon','SideBySideAniso')
 
@@ -156,9 +101,9 @@ Result('ntgcomp','ntgdecon ../ntg/Fig/ntg.vpl','SideBySideAniso')
 
 Result('ntgcomp_15_45','./Fig/ntgzoomdecon.vpl ../ntg/Fig/ntgzoom.vpl','SideBySideAniso')
 
-Result('ntgcomp_175_225','ntgz1decon ../ntg/ntgz1.vpl','SideBySideAniso')
+Result('ntgcomp_175_225','ntgz1decon ../../ntg/ntgz1.vpl','SideBySideAniso')
 
-Result('ntgcomp_375_425','ntgz2decon ../ntg/ntgz2.vpl','SideBySideAniso')
+Result('ntgcomp_375_425','ntgz2decon ../../ntg/ntgz2.vpl','SideBySideAniso')
 
 
 Flow('cdp900_cdpt1','ntgdecon',
